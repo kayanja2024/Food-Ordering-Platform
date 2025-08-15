@@ -2,7 +2,7 @@ const nodemailer = require('nodemailer');
 const twilio = require('twilio');
 
 // Email transporter
-const emailTransporter = nodemailer.createTransporter({
+const emailTransporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
   port: process.env.EMAIL_PORT,
   secure: false,
@@ -12,11 +12,29 @@ const emailTransporter = nodemailer.createTransporter({
   }
 });
 
-// Twilio client
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+// Twilio client (optional in development / when not configured)
+let twilioClient = null;
+const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, NODE_ENV } = process.env;
+try {
+  if (
+    TWILIO_ACCOUNT_SID &&
+    TWILIO_AUTH_TOKEN &&
+    /^AC/.test(String(TWILIO_ACCOUNT_SID))
+  ) {
+    twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+  } else {
+    if (NODE_ENV === 'production') {
+      throw new Error('Twilio is not configured correctly in production. Set TWILIO_ACCOUNT_SID (starts with AC) and TWILIO_AUTH_TOKEN.');
+    } else {
+      console.warn(
+        'Twilio not configured. SMS sending will be skipped in this environment.'
+      );
+    }
+  }
+} catch (err) {
+  console.warn('Failed to initialize Twilio client. SMS will be skipped.', err.message);
+  twilioClient = null;
+}
 
 // Send email
 const sendEmail = async (to, subject, html, text = '') => {
@@ -41,6 +59,11 @@ const sendEmail = async (to, subject, html, text = '') => {
 // Send SMS
 const sendSMS = async (to, message) => {
   try {
+    if (!twilioClient) {
+      console.log('[DEV] Twilio disabled. Skipping SMS:', { to, message });
+      return { sid: 'mocked-dev-sid', to, body: message };
+    }
+
     const result = await twilioClient.messages.create({
       body: message,
       from: process.env.TWILIO_PHONE_NUMBER,
